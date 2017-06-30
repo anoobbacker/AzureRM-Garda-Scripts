@@ -52,7 +52,7 @@ $DomainId = "72f988bf-86f1-41af-91ab-2d7cd011db47"
 $FrontdoorUri = New-Object System.Uri -ArgumentList $FrontdoorUrl
 $TokenUri = New-Object System.Uri -ArgumentList $TokenUrl
 
-$AADClient = [Microsoft.Rest.Azure.Authentication.ActiveDirectoryClientSettings]::UseCacheCookiesOrPrompt($TenantId, $FrontdoorUri)
+$AADClient = [Microsoft.Rest.Azure.Authentication.ActiveDirectoryClientSettings]::UsePromptOnly($TenantId, $FrontdoorUri)
 
 # Set Synchronization context
 $SyncContext = New-Object System.Threading.SynchronizationContext
