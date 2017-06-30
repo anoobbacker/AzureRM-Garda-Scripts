@@ -1,11 +1,10 @@
 ﻿<#
 .DESCRIPTION
-    This scipt reads all expected backup schedules and verifies with available backup catalogs, then displays all missed backup list.
+    This scipt reads all expected backup schedules and verifies with currently available backup catalogs, then listed (prints) all missed backup(s).
      
 .PARAMS 
 
     SubscriptionId: Specifies the ID of the subscription.
-    TenantId: Tenant Id for the subscription. Available from the Get-AzureRMSubscription PowerShell cmdlet.
     DeviceName: Specifies the name of the StorSimple device on which to create/update the volume.
     ResourceGroupName: Specifies the name of the resource group on which to create/update the volume.
     ManagerName: Specifies the name of the resource (StorSimple device manager) on which to create/update the volume.
