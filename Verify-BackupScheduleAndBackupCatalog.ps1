@@ -1,7 +1,7 @@
 ﻿<#
 .DESCRIPTION
-    This scipt reads all expected backup schedules and verifies with currently available backup catalogs, then listed (prints) all missed backup(s).
-     
+    This scipt reads all expected backup schedules and verifies with currently available backup catalogs, then lists (prints) all missed backup(s). 
+
 .PARAMS 
 
     SubscriptionId: Specifies the ID of the subscription.
@@ -17,26 +17,37 @@ Param
     [String]
     $SubscriptionId,
 
-    [parameter(Mandatory = $true, HelpMessage = "Specifies the name of the StorSimple device on which to read backup schedules and backup catalogs.")]
-    [String]
-    $DeviceName,
-
     [parameter(Mandatory = $true, HelpMessage = "Specifies the name of the resource group on which to read backup schedules and backup catalogs.")]
     [String]
     $ResourceGroupName,
 
     [parameter(Mandatory = $true, HelpMessage = "Specifies the name of the resource (StorSimple device manager) on which to read backup schedules and backup catalogs.")]
     [String]
-    $ManagerName
+    $ManagerName,
+
+    [parameter(Mandatory = $true, HelpMessage = "Specifies the name of the StorSimple device on which to read backup schedules and backup catalogs.")]
+    [String]
+    $DeviceName
 )
 
+# Set Current directory path
+$ScriptDirectory = (Get-Location).Path
+
+#Set dll path
+$ActiveDirectoryPath = Join-Path $ScriptDirectory "Dependencies\Microsoft.IdentityModel.Clients.ActiveDirectory.dll"
+$ClientRuntimeAzurePath = Join-Path $ScriptDirectory "Dependencies\Microsoft.Rest.ClientRuntime.Azure.dll"
+$ClientRuntimePath = Join-Path $ScriptDirectory "Dependencies\Microsoft.Rest.ClientRuntime.dll"
+$NewtonsoftJsonPath = Join-Path $ScriptDirectory "Dependencies\Newtonsoft.Json.dll"
+$AzureAuthenticationPath = Join-Path $ScriptDirectory "Dependencies\Microsoft.Rest.ClientRuntime.Azure.Authentication.dll"
+$StorSimple8000SeresePath = Join-Path $ScriptDirectory "Dependencies\Microsoft.Azure.Management.Storsimple8000series.dll"
+
 #Load all required assemblies
-$Assembly = [System.Reflection.Assembly]::LoadFrom("E:\WorkFolders\StorSimple\AzureRM\AzureRM.StorSimpleCmdlets\packages\Microsoft.IdentityModel.Clients.ActiveDirectory.2.28.3\lib\net45\Microsoft.IdentityModel.Clients.ActiveDirectory.dll")
-$Assembly = [System.Reflection.Assembly]::LoadFrom("E:\WorkFolders\StorSimple\AzureRM\AzureRM.StorSimpleCmdlets\AzureRM.StorSimpleCmdlets\Dependencies\Microsoft.Rest.ClientRuntime.Azure.dll")
-$Assembly = [System.Reflection.Assembly]::LoadFrom("E:\WorkFolders\StorSimple\AzureRM\AzureRM.StorSimpleCmdlets\AzureRM.StorSimpleCmdlets\Dependencies\Microsoft.Rest.ClientRuntime.dll")
-$Assembly = [System.Reflection.Assembly]::LoadFrom("E:\WorkFolders\StorSimple\AzureRM\AzureRM.StorSimpleCmdlets\AzureRM.StorSimpleCmdlets\Dependencies\Newtonsoft.Json.dll")
-$Assembly = [System.Reflection.Assembly]::LoadFrom("E:\WorkFolders\StorSimple\AzureRM\AzureRM.StorSimpleCmdlets\packages\Microsoft.Rest.ClientRuntime.Azure.Authentication.2.2.9-preview\lib\net45\Microsoft.Rest.ClientRuntime.Azure.Authentication.dll")
-$Assembly = [System.Reflection.Assembly]::LoadFrom("E:\WorkFolders\StorSimple\AzureRM\AzureRM.StorSimpleCmdlets\AzureRM.StorSimpleCmdlets\Dependencies\Microsoft.Azure.Management.Storsimple8000series.dll")
+[System.Reflection.Assembly]::LoadFrom($ActiveDirectoryPath) | Out-Null
+[System.Reflection.Assembly]::LoadFrom($ClientRuntimeAzurePath) | Out-Null
+[System.Reflection.Assembly]::LoadFrom($ClientRuntimePath) | Out-Null
+[System.Reflection.Assembly]::LoadFrom($NewtonsoftJsonPath) | Out-Null
+[System.Reflection.Assembly]::LoadFrom($AzureAuthenticationPath) | Out-Null
+[System.Reflection.Assembly]::LoadFrom($StorSimple8000SeresePath) | Out-Null
 
 # Print methods
 Function PrettyWriter($Content, $Color = "Yellow") { 
@@ -46,7 +57,6 @@ Function PrettyWriter($Content, $Color = "Yellow") {
 # Define constant variables (DO NOT CHANGE BELOW VALUES)
 $FrontdoorUrl = "urn:ietf:wg:oauth:2.0:oob"
 $TokenUrl = "https://management.azure.com"
-
 $TenantId = "1950a258-227b-4e31-a9cf-717495945fc2"
 $DomainId = "72f988bf-86f1-41af-91ab-2d7cd011db47"
 
@@ -66,6 +76,7 @@ $StorSimpleClient = New-Object Microsoft.Azure.Management.StorSimple8000Series.S
 # Set SubscriptionId
 $StorSimpleClient.SubscriptionId = $SubscriptionId
 
+# Get all backup policies by Device
 try {
     $policies = [Microsoft.Azure.Management.StorSimple8000Series.BackupPoliciesOperationsExtensions]::ListByDevice($StorSimpleClient.BackupPolicies, $DeviceName, $ResourceGroupName, $ManagerName)
 }
@@ -75,21 +86,25 @@ catch {
     break
 }
 
-# Remove disabled scheduled backup policies
+# Filter enabled scheduled backup policies
 $BackupPolicies = $policies | Where-Object { $_.ScheduledBackupStatus -eq 'Enabled'}
 
-if ($policies -eq $null) {
-    #Write-Error "Could not find active backup policies."
-    Write-Error "Backup policy is either disabled or not configured."
+if ($policies -eq $null -or $policies.Count -eq 0) {
+    Write-Error "No backup policy is configured."
     break
 }elseIf ($BackupPolicies -eq $null) {
-    Write-Error "Backup schedule is either disabled or not configured."
+    Write-Error "Either all backup schedules are disabled or no backup schedule is configured."
     break
 }
 
-
 $Schedules = @()
 $ExpectedBackups = @()
+$WeeklyBufferTimeInMinutes = 1440
+$DailyBufferTimeInMinutes = 1440
+$HourlyBufferTimeInMinutes = 120
+$MinutesBufferTimeInMinutes = 60
+
+# Populate all expected backups set by current backup schedules
 try {
     $BackupPolicies | ForEach-Object {
         # Policy Info
@@ -97,10 +112,10 @@ try {
         $BackupPolicyId = $_.Id
         $RetentionCount = $_.RetentionCount
 
-        # Call Schedule Info by Policy name
+        # Get all schedules in current Backup Policy
         $sch = [Microsoft.Azure.Management.StorSimple8000Series.BackupSchedulesOperationsExtensions]::ListByBackupPolicy($StorSimpleClient.BackupSchedules, $DeviceName, $BackupPolicyName, $ResourceGroupName, $ManagerName)
         
-        # Filter disabled schedules & no successful run (backups)
+        # Filter disabled schedules & no last successful run (backups)
         $Schedules += $sch | Where-Object { $_.ScheduleStatus -eq 'Enabled' -and $_.LastSuccessfulRun -ne $null }
         
         $Schedules | ForEach-Object {
@@ -123,11 +138,11 @@ try {
                 $Index = 1
 
                 while ($Index -le $RetentionCount -and $ExpectedScheduleTime -ge $StartTime) {
-                    $BackupsExpectedObj = New-Object psobject -Property @{
+                    $ExpectedBackupObj = New-Object psobject -Property @{
                         Id = [guid]::NewGuid()
                         BackupPolicyName = $BackupPolicyName
                         BackupPolicyId = $BackupPolicyId
-                        RecurrenceType = $_.RecurrenceType
+                        RecurrenceType = $RecurrenceType
                         ScheduleTime = $ExpectedScheduleTime
                         BufferTimeInMinutes = $null
                         BackupName = $null
@@ -145,33 +160,33 @@ try {
                         } while (!$WeekDayFound)
 
                         # Set Buffer time & search order
-                        $BackupsExpectedObj.BufferTimeInMinutes = 1440
-                        $BackupsExpectedObj.SearchOrder = 4
+                        $ExpectedBackupObj.BufferTimeInMinutes = $WeeklyBufferTimeInMinutes
+                        $ExpectedBackupObj.SearchOrder = 4
                     } elseIf ($_.RecurrenceType -eq "Daily") {
                         # Set previous schedule time by RecurrenceValue
                         $ExpectedScheduleTime = $ExpectedScheduleTime.AddDays(-$RecurrenceValue)
 
                         # Set Buffer time & search order
-                        $BackupsExpectedObj.BufferTimeInMinutes = 1440
-                        $BackupsExpectedObj.SearchOrder = 3
+                        $ExpectedBackupObj.BufferTimeInMinutes = $DailyBufferTimeInMinutes
+                        $ExpectedBackupObj.SearchOrder = 3
                     } elseIf ($_.RecurrenceType -eq "Hourly") {
                         # Set previous schedule time by RecurrenceValue
                         $ExpectedScheduleTime = $ExpectedScheduleTime.AddHours(-$RecurrenceValue)
 
                         # Set Buffer time & search order
-                        $BackupsExpectedObj.BufferTimeInMinutes = 120
-                        $BackupsExpectedObj.SearchOrder = 2
+                        $ExpectedBackupObj.BufferTimeInMinutes = $HourlyBufferTimeInMinutes
+                        $ExpectedBackupObj.SearchOrder = 2
                     } elseIf($_.RecurrenceType -eq "Minutes") {
                         # Set previous schedule time by RecurrenceValue
                         $ExpectedScheduleTime = $ExpectedScheduleTime.AddMinutes(-$RecurrenceValue)
 
                         # Set Buffer time & search order
-                        $BackupsExpectedObj.BufferTimeInMinutes = 60
-                        $BackupsExpectedObj.SearchOrder = 1
+                        $ExpectedBackupObj.BufferTimeInMinutes = $MinutesBufferTimeInMinutes
+                        $ExpectedBackupObj.SearchOrder = 1
                     }
 
                     # Add expected schedule info
-                    $ExpectedBackups += $BackupsExpectedObj
+                    $ExpectedBackups += $ExpectedBackupObj
                     $Index++
                 }
             }
@@ -189,18 +204,18 @@ if ($ExpectedBackups -eq $null -or $ExpectedBackups.Length -eq 0) {
     break
 }
 
+# Get all currently available backup catalogs
 try {
-    # Read all Backups info
     $ActualBackups = [Microsoft.Azure.Management.StorSimple8000Series.BackupsOperationsExtensions]::ListByDevice($StorSimpleClient.Backups, $DeviceName, $ResourceGroupName, $ManagerName)
     
     $SnapshotType = 'BySchedule'
     $MinimumDate = ($ExpectedBackups | sort ScheduleTime)[0].ScheduleTime
     $MaximumDate = ($ExpectedBackups | sort ScheduleTime -Descending)[0].ScheduleTime
     
-    # Filter data by BackupJobCreationType option
+    # Filter data by BackupJobCreationType and date range
     $ActualBackups = $ActualBackups | Where-Object { $_.BackupJobCreationType -eq $SnapshotType -and $_.CreatedOn -gt $MinimumDate -and $_.CreatedOn -lt $MaximumDate} 
     
-    # Add IsTracked member
+    # Add IsTagged member
     $ActualBackups | ForEach-Object { $_ | Add-Member –MemberType NoteProperty –Name IsTagged –Value $false }
 }
 catch {
@@ -209,16 +224,17 @@ catch {
     break
 }
 
+# Compare Expected & Actual backups and Tag matched objects
 for ($LoopIndex=0; $LoopIndex -lt $ExpectedBackups.Length; $LoopIndex++) {
-    $BackupExpectedObj = $ExpectedBackups[$LoopIndex]
-    $Backup = ($ActualBackups | Where-Object {$_.IsTagged -eq $false -and $_.CreatedOn -gt $BackupExpectedObj.ScheduleTime -and $_.CreatedOn -lt $BackupExpectedObj.ScheduleTime.AddMinutes($BackupExpectedObj.BufferTimeInMinutes)} | sort CreatedOn)
+    $ExpectedBackupObj = $ExpectedBackups[$LoopIndex]
+    $Backup = ($ActualBackups | Where-Object {$_.IsTagged -eq $false -and $_.CreatedOn -gt $ExpectedBackupObj.ScheduleTime -and $_.CreatedOn -lt $ExpectedBackupObj.ScheduleTime.AddMinutes($ExpectedBackupObj.BufferTimeInMinutes)} | sort CreatedOn)
 
     if ($Backup -ne $null -and $Backup.Length -gt 0) {
-        # Set IsTrack property
-        ($ActualBackups | Where-Object {$_.IsTagged -eq $false -and $_.CreatedOn -gt $BackupExpectedObj.ScheduleTime -and $_.CreatedOn -lt $BackupExpectedObj.ScheduleTime.AddMinutes($BackupExpectedObj.BufferTimeInMinutes)} | sort CreatedOn)[0].IsTagged = $true
+        # Set IsTagged property
+        ($ActualBackups | Where-Object {$_.IsTagged -eq $false -and $_.CreatedOn -gt $ExpectedBackupObj.ScheduleTime -and $_.CreatedOn -lt $ExpectedBackupObj.ScheduleTime.AddMinutes($ExpectedBackupObj.BufferTimeInMinutes)} | sort CreatedOn)[0].IsTagged = $true
 
-        # Set BackupName & CreatedOn
-        ($ExpectedBackups | where Id -eq $BackupExpectedObj.Id)| ForEach-Object { $_.BackupName = $Backup[0].Name; $_.ActualBackupTime = $Backup[0].CreatedOn }
+        # Set Actual BackupName & CreatedOn
+        ($ExpectedBackups | where Id -eq $ExpectedBackupObj.Id)| ForEach-Object { $_.BackupName = $Backup[0].Name; $_.ActualBackupTime = $Backup[0].CreatedOn }
     }
 }
 
@@ -234,12 +250,12 @@ if ($MissedBacksupsCount -gt 0) {
     ($ExpectedBackups | where BackupName -eq $null | Sort RecurrenceType | Format-Table BackupPolicyName,RecurrenceType,ScheduleTime -GroupBy RecurrenceType)
 }
 
-## Useful at testing purpose
-#PrettyWriter "`n`Expected backups:"
+## Uncomment during dubeg time
+#PrettyWriter "`nExpected backups:"
 #($ExpectedBackups | Sort-Object ScheduleTime | Format-Table BackupPolicyName, RecurrenceType, ScheduleTime, ActualBackupTime, BackupName -GroupBy {ScheduleTime.ToString("yyyy-MM-dd")})
 
-## Useful at testing purpose
-#PrettyWriter "Actual backups:"
+## Uncomment during dubeg time
+#PrettyWriter "`nActual backups:"
 #$ActualBackups | group IsTagged -NoElement
 #$ActualBackups | sort CreatedOn | Format-Table Name,CreatedOn,IsTagged #-GroupBy CreatedOn
 
@@ -247,3 +263,11 @@ PrettyWriter "`nSummary info:"
 Write-Output "Total expected backups: $($ExpectedBackups.Length)"
 Write-Output "Total available backups: $($AvailableBacksupsCount)"
 Write-Output "Total missed backups: $($MissedBacksupsCount)`n"
+
+
+$BackupsCount = ([object[]]$ActualBackups).Count
+$MaxBackupsCount = 100
+if ($ActualBackups.NextPageLink -or $BackupsCount -eq $MaxBackupsCount) {
+    PrettyWriter "`n`n Note:"
+    Write-Output "Compared only latest $($MaxBackupsCount) actual backups. `nRequire to read all backups to accomplish the verification."
+}
