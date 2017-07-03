@@ -8,13 +8,12 @@
     DeviceName: Specifies the name of the StorSimple device on which to create/update the volume.
     ResourceGroupName: Specifies the name of the resource group on which to create/update the volume.
     ManagerName: Specifies the name of the resource (StorSimple device manager) on which to create/update the volume.
-    VolumeContainerName: Specifies the container name, in which to create/update the volume.
-    VolumeName: Specifies a name for the new/existing volume.
-    VolumeType (Optional): Specifies whether to create/update a tiered, archival, locallypinned volume. Valid values are: Tiered or Archival or LocallyPinned. (Default is tiered)
-    VolumeSizeInBytes: Specifies a name for the new/existing volume.
+    VolumeContainerName: Specifies the volume container name on which to create/update the volume.
+    VolumeName: Specifies a name of the new/existing volume.
+    VolumeType (Optional): Specifies whether to create/update a tiered, archival, locallypinned volume. Valid values are: Tiered or Archival or LocallyPinned. (Default is Tiered)
+    VolumeSizeInBytes: Specifies the volume size in bytes. The volume size must be between 1GB to 64TB.
     ConnectedHostName (Optional): Specifies a access control record to associate with the volume. (Default is no ACR)
     EnableMonitoring (Optional): Specifies whether to enable monitoring for the volume. (Default is Disabled)
-
 #>
 
 Param
@@ -22,10 +21,6 @@ Param
     [parameter(Mandatory = $true, HelpMessage = "Specifies the ID of the subscription.")]
     [String]
     $SubscriptionId,
-
-    [parameter(Mandatory = $true, HelpMessage = "Specifies the name of the StorSimple device on which to create/update the volume.")]
-    [String]
-    $DeviceName,
 
     [parameter(Mandatory = $true, HelpMessage = "Specifies the name of the resource group on which to create/update the volume.")]
     [String]
@@ -35,6 +30,10 @@ Param
     [String]
     $ManagerName,
 
+    [parameter(Mandatory = $true, HelpMessage = "Specifies the name of the StorSimple device on which to create/update the volume.")]
+    [String]
+    $DeviceName,
+
     [parameter(Mandatory = $true, HelpMessage = "Specifies the container name on which to create/update the volume.")]
     [String]
     $VolumeContainerName,
@@ -43,12 +42,12 @@ Param
     [String]
     $VolumeName,
 
-    [parameter(Mandatory = $false, HelpMessage = "Specifies whether to create/udpate a tiered, locallypinned volume. Valid values are: Tiered or LocallyPinned. Optional, default is Tiered")]
-    [ValidateSet('Tiered', 'LocallyPinned')]
+    [parameter(Mandatory = $false, HelpMessage = "Specifies a type of volume. Valid values are: Tiered or LocallyPinned. Optional, default is Tiered")]
+    [ValidateSet('Tiered', 'Archival', 'LocallyPinned')]
     [String]
     $VolumeType,
 
-    [parameter(Mandatory = $true, HelpMessage = "Specifies the volume size in bytes.")]
+    [parameter(Mandatory = $true, HelpMessage = "Specifies the volume size in bytes. The volume size must be between 1GB to 64TB.")]
     [Int64]
     $VolumeSizeInBytes,
 
@@ -62,17 +61,36 @@ Param
     $EnableMonitoring
 )
 
+# Set Current directory path
+$ScriptDirectory = (Get-Location).Path
+
+#Set dll path
+$ActiveDirectoryPath = Join-Path $ScriptDirectory "Dependencies\Microsoft.IdentityModel.Clients.ActiveDirectory.dll"
+$ClientRuntimeAzurePath = Join-Path $ScriptDirectory "Dependencies\Microsoft.Rest.ClientRuntime.Azure.dll"
+$ClientRuntimePath = Join-Path $ScriptDirectory "Dependencies\Microsoft.Rest.ClientRuntime.dll"
+$NewtonsoftJsonPath = Join-Path $ScriptDirectory "Dependencies\Newtonsoft.Json.dll"
+$AzureAuthenticationPath = Join-Path $ScriptDirectory "Dependencies\Microsoft.Rest.ClientRuntime.Azure.Authentication.dll"
+$StorSimple8000SeresePath = Join-Path $ScriptDirectory "Dependencies\Microsoft.Azure.Management.Storsimple8000series.dll"
+
 #Load all required assemblies
-$Assembly = [System.Reflection.Assembly]::LoadFrom("E:\WorkFolders\StorSimple\AzureRM\AzureRM.StorSimpleCmdlets\packages\Microsoft.IdentityModel.Clients.ActiveDirectory.2.28.3\lib\net45\Microsoft.IdentityModel.Clients.ActiveDirectory.dll")
-$Assembly = [System.Reflection.Assembly]::LoadFrom("E:\WorkFolders\StorSimple\AzureRM\AzureRM.StorSimpleCmdlets\AzureRM.StorSimpleCmdlets\Dependencies\Microsoft.Rest.ClientRuntime.Azure.dll")
-$Assembly = [System.Reflection.Assembly]::LoadFrom("E:\WorkFolders\StorSimple\AzureRM\AzureRM.StorSimpleCmdlets\AzureRM.StorSimpleCmdlets\Dependencies\Microsoft.Rest.ClientRuntime.dll")
-$Assembly = [System.Reflection.Assembly]::LoadFrom("E:\WorkFolders\StorSimple\AzureRM\AzureRM.StorSimpleCmdlets\AzureRM.StorSimpleCmdlets\Dependencies\Newtonsoft.Json.dll")
-$Assembly = [System.Reflection.Assembly]::LoadFrom("E:\WorkFolders\StorSimple\AzureRM\AzureRM.StorSimpleCmdlets\packages\Microsoft.Rest.ClientRuntime.Azure.Authentication.2.2.9-preview\lib\net45\Microsoft.Rest.ClientRuntime.Azure.Authentication.dll")
-$Assembly = [System.Reflection.Assembly]::LoadFrom("E:\WorkFolders\StorSimple\AzureRM\AzureRM.StorSimpleCmdlets\AzureRM.StorSimpleCmdlets\Dependencies\Microsoft.Azure.Management.Storsimple8000series.dll")
+[System.Reflection.Assembly]::LoadFrom($ActiveDirectoryPath) | Out-Null
+[System.Reflection.Assembly]::LoadFrom($ClientRuntimeAzurePath) | Out-Null
+[System.Reflection.Assembly]::LoadFrom($ClientRuntimePath) | Out-Null
+[System.Reflection.Assembly]::LoadFrom($NewtonsoftJsonPath) | Out-Null
+[System.Reflection.Assembly]::LoadFrom($AzureAuthenticationPath) | Out-Null
+[System.Reflection.Assembly]::LoadFrom($StorSimple8000SeresePath) | Out-Null
 
 # Print methods
 Function PrettyWriter($Content, $Color = "Yellow") { 
     Write-Host $Content -Foregroundcolor $Color 
+}
+
+#Valiate volume size
+$MinimumVolumeSize = 1000000000 # 1GB
+$MaximumVolumeSize = (1000000000000 * 64) # 64TB
+if (!($VolumeSizeInBytes -ge $MinimumVolumeSize -and $VolumeSizeInBytes -le $MaximumVolumeSize)) {
+    Write-Error "The volume size (in bytes) must be between 1GB to 64TB."
+    break
 }
 
 # Define constant variables (DO NOT CHANGE BELOW VALUES)
@@ -97,7 +115,7 @@ $StorSimpleClient = New-Object Microsoft.Azure.Management.StorSimple8000Series.S
 # Set SubscriptionId
 $StorSimpleClient.SubscriptionId = $SubscriptionId
 
-# Read Access control record id
+# Get Access control record id
 $AccessControlRecordIds = New-Object "System.Collections.Generic.List[String]"
 if ($ConnectedHostName -ne $null -and $ConnectedHostName.Length -gt 0) {
     try {
@@ -127,6 +145,8 @@ if ([string]$EnableMonitoring -eq "true" -or $EnableMonitoring -eq 1) {
 $VolumeAppType = $VolumeAppType = [Microsoft.Azure.Management.StorSimple8000Series.Models.VolumeType]::Tiered
 if ($VolumeType -eq "LocallyPinned") {
     $VolumeAppType = [Microsoft.Azure.Management.StorSimple8000Series.Models.VolumeType]::LocallyPinned
+} elseif ($VolumeType -eq "Archival") {
+    $VolumeAppType = [Microsoft.Azure.Management.StorSimple8000Series.Models.VolumeType]::Archival
 }
 
 # Set Volume properties
