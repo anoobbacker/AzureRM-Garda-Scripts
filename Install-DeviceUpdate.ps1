@@ -86,6 +86,8 @@ try {
     $LastUpdatedOn = $UpdateSummary.LastUpdatedTime
     if ($LastUpdatedOn -ne $null) {
         $LastUpdatedOn = $LastUpdatedOn.ToString('ddd MMM dd yyyy')
+    } else {
+        $LastUpdatedOn = "-"
     }
 }
 catch {
